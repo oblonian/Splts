@@ -1,0 +1,49 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/decentralized-splitwise-feasibility-om5x3h
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run core tests
+        run: npm test
+
+      - name: Generate native Android project
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform android --no-install
+        env:
+          CI: 1
+
+      - name: Build release APK
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: splts-release-apk
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
