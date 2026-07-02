@@ -1,0 +1,20 @@
+{
+  "name": "@splts/relay",
+  "version": "0.1.0",
+  "description": "Dumb sync relay for Splts. Holds Yjs docs per room, relays updates, optionally snapshots to disk. Contains no business logic and cannot compute anything about your expenses.",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/server.js",
+  "bin": {
+    "splts-relay": "src/server.js"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "lib0": "^0.2.94",
+    "ws": "^8.17.0",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.0"
+  }
+}

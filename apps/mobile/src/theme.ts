@@ -1,0 +1,60 @@
+import { StyleSheet } from 'react-native';
+
+export const colors = {
+  primary: '#1a936f',
+  danger: '#c1121f',
+  text: '#1b1b1b',
+  muted: '#6b7280',
+  bg: '#f6f7f8',
+  card: '#ffffff',
+  border: '#e5e7eb',
+  positive: '#1a936f',
+  negative: '#c1121f',
+};
+
+export const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.bg },
+  container: { padding: 16, gap: 12 },
+  title: { fontSize: 24, fontWeight: '700', color: colors.text },
+  subtitle: { fontSize: 13, color: colors.muted },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 8,
+  },
+  sectionTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.card,
+    fontSize: 15,
+    color: colors.text,
+  },
+  button: {
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  buttonText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  buttonSecondary: {
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  buttonSecondaryText: { color: colors.primary, fontWeight: '600', fontSize: 15 },
+  listItemTitle: { fontSize: 16, fontWeight: '600', color: colors.text },
+  amountPositive: { color: colors.positive, fontWeight: '700' },
+  amountNegative: { color: colors.negative, fontWeight: '700' },
+  mutedText: { color: colors.muted, fontSize: 13 },
+  link: { color: colors.primary, fontWeight: '600' },
+});

@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Splts",
+    "slug": "splts",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#1a936f"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "org.splts.app"
+    }
+  }
+}

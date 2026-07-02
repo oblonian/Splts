@@ -1,0 +1,16 @@
+{
+  "name": "splts",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Open-source, decentralized expense splitting. Local-first CRDT ledger + self-hostable dumb relay.",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspace @splts/core",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "relay": "npm run start --workspace @splts/relay"
+  }
+}
