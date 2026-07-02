@@ -13,4 +13,18 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
+// lib0 (a Yjs dependency) resolves its webcrypto through the unmaintained
+// isomorphic-webcrypto package on React Native; route it to our expo-crypto
+// backed shim instead.
+const defaultResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName.startsWith('isomorphic-webcrypto')) {
+    return {
+      type: 'sourceFile',
+      filePath: path.resolve(projectRoot, 'src', 'shims', 'webcrypto.js'),
+    };
+  }
+  return (defaultResolveRequest ?? context.resolveRequest)(context, moduleName, platform);
+};
+
 module.exports = config;
