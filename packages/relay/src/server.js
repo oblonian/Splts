@@ -42,6 +42,9 @@ class Room {
     this.awareness.setLocalState(null);
     /** @type {Set<import('ws').WebSocket>} */
     this.conns = new Set();
+    /** Awareness client ids controlled by each connection, cleaned up on close. */
+    /** @type {Map<import('ws').WebSocket, Set<number>>} */
+    this.controlledIds = new Map();
     /** @type {ReturnType<typeof setTimeout> | null} */
     this.snapshotTimer = null;
 
@@ -57,6 +60,12 @@ class Room {
 
     this.awareness.on('update', ({ added, updated, removed }, origin) => {
       const changed = added.concat(updated, removed);
+      if (origin && this.conns.has(origin)) {
+        let ids = this.controlledIds.get(origin);
+        if (!ids) this.controlledIds.set(origin, (ids = new Set()));
+        for (const id of added.concat(updated)) ids.add(id);
+        for (const id of removed) ids.delete(id);
+      }
       const encoder = encoding.createEncoder();
       encoding.writeVarUint(encoder, MSG_AWARENESS);
       encoding.writeVarUint8Array(
@@ -83,17 +92,27 @@ class Room {
     }
   }
 
-  scheduleSnapshot() {
+  /** Atomic snapshot write (tmp + rename) shared by the timer and close paths. */
+  writeSnapshot() {
     if (!DATA_DIR) return;
-    if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
-    this.snapshotTimer = setTimeout(() => {
-      this.snapshotTimer = null;
+    try {
       const update = Y.encodeStateAsUpdate(this.doc);
       fs.mkdirSync(DATA_DIR, { recursive: true });
       const target = this.snapshotPath();
       const tmp = `${target}.tmp`;
       fs.writeFileSync(tmp, update);
       fs.renameSync(tmp, target);
+    } catch (err) {
+      console.error(`[room ${this.name}] snapshot write failed:`, err);
+    }
+  }
+
+  scheduleSnapshot() {
+    if (!DATA_DIR) return;
+    if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = setTimeout(() => {
+      this.snapshotTimer = null;
+      this.writeSnapshot();
     }, SNAPSHOT_DEBOUNCE_MS);
   }
 
@@ -169,6 +188,12 @@ class Room {
   /** @param {import('ws').WebSocket} conn */
   removeConnection(conn) {
     if (!this.conns.delete(conn)) return;
+    // Drop this client's awareness states so peers don't see a ghost.
+    const controlled = this.controlledIds.get(conn);
+    this.controlledIds.delete(conn);
+    if (controlled && controlled.size > 0) {
+      awarenessProtocol.removeAwarenessStates(this.awareness, [...controlled], null);
+    }
     if (this.conns.size === 0) {
       // Flush any pending snapshot, then free memory. Doc state survives on
       // disk (with DATA_DIR) or on the peers' devices — the relay is not the
@@ -176,10 +201,7 @@ class Room {
       if (this.snapshotTimer) {
         clearTimeout(this.snapshotTimer);
         this.snapshotTimer = null;
-        if (DATA_DIR) {
-          fs.mkdirSync(DATA_DIR, { recursive: true });
-          fs.writeFileSync(this.snapshotPath(), Y.encodeStateAsUpdate(this.doc));
-        }
+        this.writeSnapshot();
       }
       this.awareness.destroy();
       this.doc.destroy();
@@ -204,8 +226,27 @@ wss.on('connection', (conn, req) => {
     rooms.set(roomName, room);
     console.log(`[room ${roomName}] opened`);
   }
+  conn.isAlive = true;
+  conn.on('pong', () => {
+    conn.isAlive = true;
+  });
   room.addConnection(conn);
 });
+
+// Heartbeat: phones on flaky networks drop without a TCP FIN, which would
+// otherwise leave dead connections pinning rooms in memory forever.
+const HEARTBEAT_MS = 30000;
+const heartbeat = setInterval(() => {
+  for (const conn of wss.clients) {
+    if (conn.isAlive === false) {
+      conn.terminate(); // fires 'close' -> removeConnection cleans up
+      continue;
+    }
+    conn.isAlive = false;
+    conn.ping();
+  }
+}, HEARTBEAT_MS);
+wss.on('close', () => clearInterval(heartbeat));
 
 server.listen(PORT, () => {
   console.log(`Splts relay listening on :${PORT} (persistence: ${DATA_DIR ?? 'off'})`);

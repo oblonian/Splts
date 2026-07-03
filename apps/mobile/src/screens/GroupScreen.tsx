@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Pressable, ScrollView, Share, Text, View } from 'react-native';
 import {
+  activeExpenses,
   appendEvent,
   computeBalances,
   equalSplit,
@@ -11,12 +12,13 @@ import {
   readMembers,
   readMeta,
   settleUp,
-  type LedgerEvent,
   type Member,
 } from '@splts/core';
 import type { Identity } from '../identity';
 import { encodeInvite, openGroup, type GroupRef, type OpenGroup } from '../groupStore';
 import { colors, styles } from '../theme';
+import { Banner, Field, GhostButton, PrimaryButton } from '../ui';
+import { useBackHandler } from '../useBackHandler';
 
 export function GroupScreen({
   groupRef,
@@ -28,59 +30,90 @@ export function GroupScreen({
   onBack: () => void;
 }) {
   const [group, setGroup] = useState<OpenGroup | null>(null);
+  const [openError, setOpenError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [connected, setConnected] = useState(false);
   // Bumped on every doc change to re-render from the latest CRDT state.
   const [version, setVersion] = useState(0);
   const [adding, setAdding] = useState(false);
 
+  useBackHandler(adding, () => setAdding(false));
+
   useEffect(() => {
     let active = true;
     let opened: OpenGroup | null = null;
-    openGroup(groupRef).then((g) => {
-      if (!active) {
-        g.close();
-        return;
-      }
-      opened = g;
-      g.doc.on('update', () => setVersion((v) => v + 1));
-      g.provider.on('status', ({ status }: { status: string }) =>
-        setConnected(status === 'connected'),
-      );
-      setGroup(g);
-    });
+    openGroup(groupRef, { onPersistError: () => setSaveError(true) })
+      .then((g) => {
+        if (!active) {
+          g.close();
+          return;
+        }
+        opened = g;
+        g.doc.on('update', () => setVersion((v) => v + 1));
+        // The provider may have connected during the storage read, before
+        // this listener existed — seed from its current state.
+        setConnected(g.provider.wsconnected);
+        g.provider.on('status', ({ status }: { status: string }) =>
+          setConnected(status === 'connected'),
+        );
+        setGroup(g);
+      })
+      .catch(() => {
+        if (active) setOpenError(true);
+      });
     return () => {
       active = false;
       opened?.close();
     };
   }, [groupRef]);
 
+  const append = useCallback(
+    (event: Parameters<typeof appendEvent>[1]) => {
+      // The confirm dialog (or a slow tap) can outlive this screen; writing
+      // to a destroyed doc would silently drop the event.
+      if (!group || group.doc.isDestroyed) return;
+      appendEvent(group.doc, event);
+    },
+    [group],
+  );
+
   const state = useMemo(() => {
     if (!group) return null;
     const events = readEvents(group.doc);
+    const balances = computeBalances(events);
     return {
       meta: readMeta(group.doc),
       members: readMembers(group.doc),
-      events,
-      balances: computeBalances(events),
+      expenses: activeExpenses(events),
+      balances,
+      transfers: settleUp(balances),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group, version]);
 
+  if (openError) {
+    return (
+      <View style={[styles.container, { flex: 1, justifyContent: 'center' }]}>
+        <Banner text="Couldn't open this group — its local data may be damaged." />
+        <GhostButton label="← Back to groups" onPress={onBack} />
+      </View>
+    );
+  }
+
   if (!group || !state) {
     return (
       <View style={[styles.container, { flex: 1 }]}>
+        <Pressable onPress={onBack}>
+          <Text style={styles.link}>← Groups</Text>
+        </Pressable>
         <Text style={styles.mutedText}>Opening group…</Text>
       </View>
     );
   }
 
-  const { meta, members, events, balances } = state;
+  const { meta, members, expenses, balances, transfers } = state;
   const memberName = (id: string) => members.find((m) => m.id === id)?.name ?? 'unknown';
-  const expenses = events
-    .filter((e): e is Extract<LedgerEvent, { type: 'expense-added' }> => e.type === 'expense-added')
-    .filter((e) => !events.some((v) => v.type === 'expense-voided' && v.target === e.id))
-    .sort((a, b) => b.createdAt - a.createdAt);
-  const transfers = settleUp(balances);
+  const myBalance = balances[identity.id] ?? 0;
 
   const voidExpense = (targetId: string) => {
     Alert.alert('Delete expense?', 'It will be removed for everyone in the group.', [
@@ -89,7 +122,7 @@ export function GroupScreen({
         text: 'Delete',
         style: 'destructive',
         onPress: () =>
-          appendEvent(group.doc, {
+          append({
             type: 'expense-voided',
             id: newId(),
             target: targetId,
@@ -98,18 +131,6 @@ export function GroupScreen({
           }),
       },
     ]);
-  };
-
-  const recordPayment = (from: string, to: string, amount: number) => {
-    appendEvent(group.doc, {
-      type: 'payment-recorded',
-      id: newId(),
-      from,
-      to,
-      amount,
-      createdBy: identity.id,
-      createdAt: Date.now(),
-    });
   };
 
   const shareInvite = () => {
@@ -123,8 +144,9 @@ export function GroupScreen({
       <AddExpenseForm
         members={members}
         identity={identity}
+        currency={meta.currency}
         onSubmit={(description, amount, paidBy) => {
-          appendEvent(group.doc, {
+          append({
             type: 'expense-added',
             id: newId(),
             description,
@@ -147,7 +169,7 @@ export function GroupScreen({
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <View style={styles.row}>
-        <Pressable onPress={onBack}>
+        <Pressable onPress={onBack} hitSlop={12}>
           <Text style={styles.link}>← Groups</Text>
         </Pressable>
         <Text style={connected ? { color: colors.positive } : { color: colors.muted }}>
@@ -160,48 +182,85 @@ export function GroupScreen({
         {members.length} member{members.length === 1 ? '' : 's'} · {meta.currency}
       </Text>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Balances</Text>
-        {members.map((m) => {
-          const balance = balances[m.id] ?? 0;
-          return (
-            <View key={m.id} style={styles.row}>
-              <Text>{m.id === identity.id ? `${m.name} (you)` : m.name}</Text>
-              <Text style={balance >= 0 ? styles.amountPositive : styles.amountNegative}>
-                {balance >= 0 ? '+' : ''}
-                {formatAmount(balance)}
-              </Text>
-            </View>
-          );
-        })}
-        {transfers.length > 0 && (
+      {saveError && (
+        <Banner text="Couldn't save changes to this device — free up storage. Synced copies are unaffected." />
+      )}
+
+      <View style={[styles.card, { alignItems: 'center', paddingVertical: 18 }]}>
+        {myBalance === 0 ? (
+          <Text style={styles.listItemTitle}>You're all settled up 🎉</Text>
+        ) : (
           <>
-            <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Settle up</Text>
-            {transfers.map((t, i) => (
-              <View key={i} style={styles.row}>
-                <Text style={styles.mutedText}>
-                  {memberName(t.from)} → {memberName(t.to)}: {formatAmount(t.amount)}
-                </Text>
-                {t.from === identity.id && (
-                  <Pressable onPress={() => recordPayment(t.from, t.to, t.amount)}>
-                    <Text style={styles.link}>I paid this</Text>
-                  </Pressable>
-                )}
-              </View>
-            ))}
+            <Text style={styles.mutedText}>{myBalance > 0 ? "You're owed" : 'You owe'}</Text>
+            <Text
+              style={[
+                { fontSize: 32, fontWeight: '700' },
+                myBalance > 0 ? { color: colors.positive } : { color: colors.negative },
+              ]}
+            >
+              {formatAmount(Math.abs(myBalance))} {meta.currency}
+            </Text>
           </>
         )}
       </View>
 
-      <Pressable style={styles.button} onPress={() => setAdding(true)}>
-        <Text style={styles.buttonText}>Add expense</Text>
-      </Pressable>
-      <Pressable style={styles.buttonSecondary} onPress={shareInvite}>
-        <Text style={styles.buttonSecondaryText}>Invite someone</Text>
-      </Pressable>
+      <PrimaryButton label="Add expense" onPress={() => setAdding(true)} />
+      <GhostButton label="Invite someone" onPress={shareInvite} />
+
+      {members.length > 1 && (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Balances</Text>
+          {members.map((m) => {
+            const balance = balances[m.id] ?? 0;
+            return (
+              <View key={m.id} style={styles.row}>
+                <Text>{m.id === identity.id ? `${m.name} (you)` : m.name}</Text>
+                <Text style={balance >= 0 ? styles.amountPositive : styles.amountNegative}>
+                  {balance >= 0 ? '+' : ''}
+                  {formatAmount(balance)}
+                </Text>
+              </View>
+            );
+          })}
+          {transfers.length > 0 && (
+            <>
+              <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Suggested settle-up</Text>
+              {transfers.map((t, i) => (
+                <View key={i} style={styles.row}>
+                  <Text style={styles.mutedText}>
+                    {memberName(t.from)} → {memberName(t.to)}: {formatAmount(t.amount)}
+                  </Text>
+                  {t.from === identity.id && (
+                    <Pressable
+                      hitSlop={8}
+                      onPress={() =>
+                        append({
+                          type: 'payment-recorded',
+                          id: newId(),
+                          from: t.from,
+                          to: t.to,
+                          amount: t.amount,
+                          createdBy: identity.id,
+                          createdAt: Date.now(),
+                        })
+                      }
+                    >
+                      <Text style={styles.link}>I paid this</Text>
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+            </>
+          )}
+        </View>
+      )}
 
       <Text style={styles.sectionTitle}>Expenses</Text>
-      {expenses.length === 0 && <Text style={styles.mutedText}>Nothing yet.</Text>}
+      {expenses.length === 0 && (
+        <Text style={styles.mutedText}>
+          Nothing yet — add the first expense and it'll be split with the group.
+        </Text>
+      )}
       {expenses.map((e) => (
         <View key={e.id} style={styles.card}>
           <View style={styles.row}>
@@ -210,9 +269,10 @@ export function GroupScreen({
           </View>
           <View style={styles.row}>
             <Text style={styles.mutedText}>
-              paid by {memberName(e.paidBy)} · split {Object.keys(e.split).length} ways
+              paid by {e.paidBy === identity.id ? 'you' : memberName(e.paidBy)} · split{' '}
+              {Object.keys(e.split).length} ways
             </Text>
-            <Pressable onPress={() => voidExpense(e.id)}>
+            <Pressable onPress={() => voidExpense(e.id)} hitSlop={8}>
               <Text style={{ color: colors.danger }}>delete</Text>
             </Pressable>
           </View>
@@ -225,11 +285,13 @@ export function GroupScreen({
 function AddExpenseForm({
   members,
   identity,
+  currency,
   onSubmit,
   onCancel,
 }: {
   members: Member[];
   identity: Identity;
+  currency: string;
   onSubmit: (description: string, amount: number, paidBy: string) => void;
   onCancel: () => void;
 }) {
@@ -237,23 +299,24 @@ function AddExpenseForm({
   const [amountText, setAmountText] = useState('');
   const [paidBy, setPaidBy] = useState(identity.id);
   const amount = parseAmount(amountText);
-  const valid = description.trim().length > 0 && amount !== null;
+  const valid = description.trim().length > 0 && amount !== null && members.length > 0;
+  const perHead = amount !== null && members.length > 0 ? Math.round(amount / members.length) : null;
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.title}>Add expense</Text>
-      <TextInput
-        style={styles.input}
+      <Field
         placeholder="What was it? (e.g. Dinner)"
-        placeholderTextColor={colors.muted}
         value={description}
         onChangeText={setDescription}
         autoFocus
       />
-      <TextInput
-        style={styles.input}
+      <Field
         placeholder="Amount (e.g. 42.50)"
-        placeholderTextColor={colors.muted}
         value={amountText}
         onChangeText={setAmountText}
         keyboardType="decimal-pad"
@@ -270,25 +333,23 @@ function AddExpenseForm({
               paidBy === m.id && { backgroundColor: colors.primary },
             ]}
           >
-            <Text
-              style={[styles.buttonSecondaryText, paidBy === m.id && { color: '#fff' }]}
-            >
+            <Text style={[styles.buttonSecondaryText, paidBy === m.id && { color: '#fff' }]}>
               {m.id === identity.id ? `${m.name} (you)` : m.name}
             </Text>
           </Pressable>
         ))}
       </View>
-      <Text style={styles.mutedText}>Split equally among all {members.length} members.</Text>
-      <Pressable
-        style={[styles.button, !valid && { opacity: 0.5 }]}
+      <Text style={styles.mutedText}>
+        {perHead !== null
+          ? `Split equally: ≈ ${formatAmount(perHead)} ${currency} each (${members.length} members)`
+          : `Split equally among all ${members.length} members.`}
+      </Text>
+      <PrimaryButton
+        label="Add"
         disabled={!valid}
         onPress={() => valid && onSubmit(description.trim(), amount!, paidBy)}
-      >
-        <Text style={styles.buttonText}>Add</Text>
-      </Pressable>
-      <Pressable style={styles.buttonSecondary} onPress={onCancel}>
-        <Text style={styles.buttonSecondaryText}>Cancel</Text>
-      </Pressable>
-    </View>
+      />
+      <GhostButton label="Cancel" onPress={onCancel} />
+    </ScrollView>
   );
 }

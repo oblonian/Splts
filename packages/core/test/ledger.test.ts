@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { computeBalances, equalSplit, formatAmount, parseAmount, settleUp } from '../src/ledger.ts';
+import {
+  activeExpenses,
+  computeBalances,
+  equalSplit,
+  formatAmount,
+  parseAmount,
+  settleUp,
+} from '../src/ledger.ts';
 import type { LedgerEvent } from '../src/types.ts';
 
 const expense = (
@@ -74,6 +81,16 @@ describe('computeBalances', () => {
     ];
     const total = Object.values(computeBalances(events)).reduce((a, b) => a + b, 0);
     expect(total).toBe(0);
+  });
+});
+
+describe('activeExpenses', () => {
+  it('excludes voided expenses and sorts newest first, matching computeBalances semantics', () => {
+    const e1 = { ...expense('e1', 1000, 'a', { a: 1000 }), createdAt: 1 };
+    const e2 = { ...expense('e2', 2000, 'a', { a: 2000 }), createdAt: 2 };
+    const voidE1: LedgerEvent = { type: 'expense-voided', id: 'v1', target: 'e1', createdBy: 'a', createdAt: 3 };
+    expect(activeExpenses([voidE1, e1, e2])).toEqual([e2]);
+    expect(computeBalances([voidE1, e1, e2])).toEqual({ a: 0 });
   });
 });
 

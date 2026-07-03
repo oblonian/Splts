@@ -1,4 +1,4 @@
-import type { Balances, LedgerEvent, MemberId, Transfer } from './types.ts';
+import type { Balances, ExpenseAdded, LedgerEvent, MemberId, Transfer } from './types.ts';
 
 /**
  * Split an amount equally among members, distributing remainder cents
@@ -18,6 +18,23 @@ export function equalSplit(amount: number, members: MemberId[]): Record<MemberId
   return split;
 }
 
+/** Ids of expenses that have been voided. The single source of void semantics. */
+export function voidedIds(events: LedgerEvent[]): Set<string> {
+  const voided = new Set<string>();
+  for (const e of events) {
+    if (e.type === 'expense-voided') voided.add(e.target);
+  }
+  return voided;
+}
+
+/** Expenses that still count, newest first. */
+export function activeExpenses(events: LedgerEvent[]): ExpenseAdded[] {
+  const voided = voidedIds(events);
+  return events
+    .filter((e): e is ExpenseAdded => e.type === 'expense-added' && !voided.has(e.id))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
 /**
  * Replay the event log into net balances.
  * Positive balance = the group owes this member; negative = they owe the group.
@@ -25,10 +42,7 @@ export function equalSplit(amount: number, members: MemberId[]): Record<MemberId
  * (it may arrive before its target during sync — order-independence matters).
  */
 export function computeBalances(events: LedgerEvent[]): Balances {
-  const voided = new Set<string>();
-  for (const e of events) {
-    if (e.type === 'expense-voided') voided.add(e.target);
-  }
+  const voided = voidedIds(events);
 
   const balances: Balances = {};
   const credit = (m: MemberId, amount: number) => {

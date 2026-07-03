@@ -8,6 +8,11 @@ export const DEFAULT_RELAY_URL = 'ws://localhost:4444';
 
 const INDEX_KEY = 'splts:groups';
 const docKey = (groupId: string) => `splts:doc:${groupId}`;
+const chunkKey = (groupId: string, i: number) => `splts:doc:${groupId}:${i}`;
+
+// Android's AsyncStorage reads rows through a ~2 MB CursorWindow; a single
+// huge value becomes unreadable. Store the doc as chunks well under that.
+const CHUNK_CHARS = 250_000;
 
 export interface GroupRef {
   /** Doubles as the sync room name. Knowing the id = membership (v0). */
@@ -34,7 +39,11 @@ export async function addGroupRef(ref: GroupRef): Promise<void> {
 
 export async function removeGroupRef(groupId: string): Promise<void> {
   await saveGroups((await listGroups()).filter((g) => g.id !== groupId));
-  await AsyncStorage.removeItem(docKey(groupId));
+  const meta = await AsyncStorage.getItem(docKey(groupId)).catch(() => null);
+  const keys = [docKey(groupId)];
+  const chunkCount = parseChunkCount(meta);
+  for (let i = 0; i < chunkCount; i++) keys.push(chunkKey(groupId, i));
+  await AsyncStorage.multiRemove(keys).catch(() => {});
 }
 
 export function newGroupRef(relayUrl: string): GroupRef {
@@ -51,14 +60,75 @@ export function decodeInvite(code: string): GroupRef | null {
   if (at <= 0) return null;
   const id = code.slice(0, at).trim();
   const relayUrl = code.slice(at + 1).trim();
-  if (!/^[0-9a-f]{32}$/.test(id) || !/^wss?:\/\//.test(relayUrl)) return null;
+  if (!/^[0-9a-f]{32}$/.test(id) || !/^wss?:\/\/.+/.test(relayUrl)) return null;
   return { id, relayUrl };
+}
+
+function parseChunkCount(metaValue: string | null): number {
+  if (!metaValue || !metaValue.startsWith('{')) return 0;
+  try {
+    const parsed = JSON.parse(metaValue) as { chunks?: number };
+    return typeof parsed.chunks === 'number' && parsed.chunks >= 0 ? parsed.chunks : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Hydrate a doc from local storage. Handles both chunked and legacy formats. */
+async function loadDocInto(doc: Y.Doc, groupId: string): Promise<void> {
+  const meta = await AsyncStorage.getItem(docKey(groupId));
+  if (!meta) return;
+  let b64: string;
+  if (meta.startsWith('{')) {
+    const count = parseChunkCount(meta);
+    if (count === 0) return;
+    const keys = Array.from({ length: count }, (_, i) => chunkKey(groupId, i));
+    const rows = await AsyncStorage.multiGet(keys);
+    b64 = rows.map(([, v]) => v ?? '').join('');
+  } else {
+    // Legacy single-key format from v0 builds.
+    b64 = meta;
+  }
+  if (b64) Y.applyUpdate(doc, fromBase64(b64));
+}
+
+async function saveDoc(doc: Y.Doc, groupId: string): Promise<void> {
+  const b64 = toBase64(Y.encodeStateAsUpdate(doc));
+  const chunks: string[] = [];
+  for (let i = 0; i < b64.length; i += CHUNK_CHARS) chunks.push(b64.slice(i, i + CHUNK_CHARS));
+  const previousCount = parseChunkCount(await AsyncStorage.getItem(docKey(groupId)).catch(() => null));
+
+  const pairs: [string, string][] = chunks.map((c, i) => [chunkKey(groupId, i), c]);
+  pairs.push([docKey(groupId), JSON.stringify({ chunks: chunks.length })]);
+  await AsyncStorage.multiSet(pairs);
+
+  if (previousCount > chunks.length) {
+    const stale: string[] = [];
+    for (let i = chunks.length; i < previousCount; i++) stale.push(chunkKey(groupId, i));
+    await AsyncStorage.multiRemove(stale).catch(() => {});
+  }
+}
+
+/**
+ * Read a group's doc from local storage only — no relay connection, no
+ * listeners. For the group list and anywhere else that just needs a peek.
+ */
+export async function loadGroupSnapshot(ref: GroupRef): Promise<Y.Doc> {
+  const doc = new Y.Doc();
+  await loadDocInto(doc, ref.id);
+  return doc;
+}
+
+export interface OpenGroupOptions {
+  /** Called when persisting to local storage fails — surface this, don't hide it. */
+  onPersistError?: (error: unknown) => void;
 }
 
 export interface OpenGroup {
   doc: Y.Doc;
   provider: WebsocketProvider;
-  close: () => void;
+  /** Flushes pending changes to storage, then tears down. Await before re-opening. */
+  close: () => Promise<void>;
 }
 
 /**
@@ -67,21 +137,24 @@ export interface OpenGroup {
  * (debounced). The device's local copy is the source of truth; the relay is
  * just transport.
  */
-export async function openGroup(ref: GroupRef): Promise<OpenGroup> {
+export async function openGroup(ref: GroupRef, options?: OpenGroupOptions): Promise<OpenGroup> {
   const doc = new Y.Doc();
-
-  const persisted = await AsyncStorage.getItem(docKey(ref.id));
-  if (persisted) Y.applyUpdate(doc, fromBase64(persisted));
+  await loadDocInto(doc, ref.id);
 
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
-  const persist = () => {
+  let lastWrite: Promise<void> = Promise.resolve();
+  const flush = () => {
+    lastWrite = saveDoc(doc, ref.id).catch((err) => options?.onPersistError?.(err));
+    return lastWrite;
+  };
+  const persistSoon = () => {
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
       persistTimer = null;
-      AsyncStorage.setItem(docKey(ref.id), toBase64(Y.encodeStateAsUpdate(doc))).catch(() => {});
+      flush();
     }, 500);
   };
-  doc.on('update', persist);
+  doc.on('update', persistSoon);
 
   const provider = new WebsocketProvider(ref.relayUrl, `splts-${ref.id}`, doc, {
     disableBc: true,
@@ -90,11 +163,13 @@ export async function openGroup(ref: GroupRef): Promise<OpenGroup> {
   return {
     doc,
     provider,
-    close: () => {
+    close: async () => {
       if (persistTimer) {
         clearTimeout(persistTimer);
-        AsyncStorage.setItem(docKey(ref.id), toBase64(Y.encodeStateAsUpdate(doc))).catch(() => {});
+        persistTimer = null;
+        flush();
       }
+      await lastWrite;
       provider.destroy();
       doc.destroy();
     },
