@@ -75,24 +75,8 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: |
-            adb install -r splts.apk
-            adb logcat -c
-            adb shell am start -n org.splts.app/.MainActivity
-            sleep 30
-            adb exec-out screencap -p > emulator-screenshot.png
-            adb logcat -d > emulator-logcat.txt
-            if ! adb shell pidof org.splts.app; then
-              echo "::error::App process is not running 30s after launch"
-              grep -B 2 -A 60 "FATAL EXCEPTION" emulator-logcat.txt || true
-              exit 1
-            fi
-            if grep -q "FATAL EXCEPTION" emulator-logcat.txt; then
-              echo "::error::FATAL EXCEPTION in logcat"
-              grep -B 2 -A 60 "FATAL EXCEPTION" emulator-logcat.txt
-              exit 1
-            fi
-            echo "App launched and is running."
+          # The action runs each script line as a separate shell; keep it one line.
+          script: bash .github/scripts/emulator-smoke.sh
 
       - name: Upload emulator logs and screenshot
         if: always()
