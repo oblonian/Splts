@@ -24,10 +24,12 @@ fi
 if [ -n "$crashed" ]; then
   echo "===== FATAL EXCEPTION context ====="
   grep -B 2 -A 80 "FATAL EXCEPTION" emulator-logcat.txt || true
+  echo "===== runtime-not-ready context ====="
+  grep -B 10 -A 60 "runtime not ready" emulator-logcat.txt || true
   echo "===== Last ReactNativeJS lines ====="
   grep "ReactNativeJS" emulator-logcat.txt | tail -60 || true
-  echo "===== Last AndroidRuntime lines ====="
-  grep "AndroidRuntime" emulator-logcat.txt | tail -60 || true
+  echo "===== Error-level lines (tail) ====="
+  grep -E " E | F |Fatal signal|DEBUG   :" emulator-logcat.txt | tail -100 || true
   exit 1
 fi
 
