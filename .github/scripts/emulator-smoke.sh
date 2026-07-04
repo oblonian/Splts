@@ -12,6 +12,10 @@ if [ -f splts-debug.apk ]; then
   adb logcat -d > debug-logcat.txt
   echo "===== DEBUG build: ReactNativeJS output ====="
   grep "ReactNativeJS" debug-logcat.txt | tail -120 || true
+  echo "===== DEBUG build: named crash stack (BridgelessReact) ====="
+  grep "BridgelessReact" debug-logcat.txt | tail -120 || true
+  echo "===== DEBUG build: runtime-not-ready context ====="
+  grep -B 3 -A 90 "runtime not ready" debug-logcat.txt | head -200 || true
   adb shell am force-stop org.splts.app
   adb uninstall org.splts.app || true
 fi
