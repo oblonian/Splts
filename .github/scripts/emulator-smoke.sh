@@ -3,23 +3,6 @@
 # fails loudly with the crash stack if the process dies.
 set -uo pipefail
 
-# First: launch the DEBUG build, whose JS errors carry full symbol names.
-if [ -f splts-debug.apk ]; then
-  adb install -r splts-debug.apk
-  adb logcat -c
-  adb shell am start -n org.splts.app/.MainActivity
-  sleep 30
-  adb logcat -d > debug-logcat.txt
-  echo "===== DEBUG build: ReactNativeJS output ====="
-  grep "ReactNativeJS" debug-logcat.txt | tail -120 || true
-  echo "===== DEBUG build: named crash stack (BridgelessReact) ====="
-  grep "BridgelessReact" debug-logcat.txt | tail -120 || true
-  echo "===== DEBUG build: runtime-not-ready context ====="
-  grep -B 3 -A 90 "runtime not ready" debug-logcat.txt | head -200 || true
-  adb shell am force-stop org.splts.app
-  adb uninstall org.splts.app || true
-fi
-
 adb install -r splts.apk
 adb logcat -c
 adb shell am start -n org.splts.app/.MainActivity
@@ -38,7 +21,20 @@ if grep -q "FATAL EXCEPTION" emulator-logcat.txt; then
   crashed=1
 fi
 
+symbolicate() {
+  local logfile="$1"
+  local map
+  map=$(find apps/mobile/android/app/build/intermediates/sourcemaps -name 'index.android.bundle.map' 2>/dev/null | head -1)
+  if [ -z "$map" ]; then echo "(no source map found)"; return; fi
+  grep -o '[A-Za-z0-9_$<>.]*@1:[0-9]*' "$logfile" | head -40 > hermes-stack.txt || true
+  if [ -s hermes-stack.txt ]; then
+    echo "===== SYMBOLICATED STACK ====="
+    npx metro-symbolicate "$map" < hermes-stack.txt || true
+  fi
+}
+
 if [ -n "$crashed" ]; then
+  symbolicate emulator-logcat.txt
   echo "===== FATAL EXCEPTION context ====="
   grep -B 2 -A 80 "FATAL EXCEPTION" emulator-logcat.txt || true
   echo "===== runtime-not-ready context ====="
