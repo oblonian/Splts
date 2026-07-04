@@ -3,6 +3,19 @@
 # fails loudly with the crash stack if the process dies.
 set -uo pipefail
 
+# First: launch the DEBUG build, whose JS errors carry full symbol names.
+if [ -f splts-debug.apk ]; then
+  adb install -r splts-debug.apk
+  adb logcat -c
+  adb shell am start -n org.splts.app/.MainActivity
+  sleep 30
+  adb logcat -d > debug-logcat.txt
+  echo "===== DEBUG build: ReactNativeJS output ====="
+  grep "ReactNativeJS" debug-logcat.txt | tail -120 || true
+  adb shell am force-stop org.splts.app
+  adb uninstall org.splts.app || true
+fi
+
 adb install -r splts.apk
 adb logcat -c
 adb shell am start -n org.splts.app/.MainActivity

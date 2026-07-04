@@ -61,6 +61,15 @@ jobs:
       - name: Rename arm64 APK for release
         run: cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk splts-arm64.apk
 
+      - name: Build debug APK with embedded bundle (readable crash stacks)
+        working-directory: apps/mobile/android
+        run: |
+          # Make the debug variant embed its JS bundle so it runs without Metro
+          sed -i 's/autolinkLibrariesWithApp()/autolinkLibrariesWithApp()\n    debuggableVariants = []/' app/build.gradle
+          grep -n "debuggableVariants" app/build.gradle
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../../../splts-debug.apk
+
       - name: Enable KVM for the emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
