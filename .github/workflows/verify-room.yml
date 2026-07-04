@@ -1,0 +1,25 @@
+name: Verify relay room
+
+on:
+  workflow_dispatch:
+    inputs:
+      room:
+        description: Group id (room name without the splts- prefix)
+        required: true
+      relay:
+        description: Relay URL
+        default: wss://demos.yjs.dev/ws
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Connect and report (read-only, counts only)
+        run: node .github/scripts/verify-room.mjs "${{ github.event.inputs.relay }}" "${{ github.event.inputs.room }}"
