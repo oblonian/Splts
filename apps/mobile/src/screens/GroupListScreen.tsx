@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FlatList, Pressable, Switch, Text, View } from 'react-native';
-import { getMeta, initGroupDoc, upsertMember } from '@splts/core';
+import { Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { getMeta, initGroupDoc, upsertMember, type GroupMeta } from '@splts/core';
 import type { Identity } from '../identity';
 import {
   addGroupRef,
@@ -16,9 +16,12 @@ import { colors, styles } from '../theme';
 import { Banner, Field, GhostButton, PrimaryButton } from '../ui';
 import { useBackHandler } from '../useBackHandler';
 
+const CURRENCIES = ['USD', 'EUR', 'INR', 'GBP', 'JPY', 'AUD', 'CAD', 'BRL'];
+
 interface GroupRow {
   ref: GroupRef;
   name: string;
+  kind: 'group' | 'friend';
   broken?: boolean;
 }
 
@@ -44,11 +47,13 @@ export function GroupListScreen({
         refs.map(async (ref): Promise<GroupRow> => {
           try {
             const doc = await loadGroupSnapshot(ref);
-            const name = getMeta(doc).get('name') ?? 'Waiting for first sync…';
+            const meta = getMeta(doc);
+            const name = meta.get('name') ?? 'Waiting for first sync…';
+            const kind = meta.get('kind') === 'friend' ? 'friend' as const : 'group' as const;
             doc.destroy();
-            return { ref, name };
+            return { ref, name, kind };
           } catch {
-            return { ref, name: 'Unreadable group', broken: true };
+            return { ref, name: 'Unreadable group', kind: 'group', broken: true };
           }
         }),
       );
@@ -64,18 +69,18 @@ export function GroupListScreen({
     refresh();
   }, [refresh]);
 
-  const createGroup = async (name: string, relayUrl: string) => {
+  const createGroup = async (meta: GroupMeta, relayUrl: string) => {
     try {
       const ref = newGroupRef(relayUrl);
       const group = await openGroup(ref);
-      initGroupDoc(group.doc, { name, currency: 'USD' }, { id: identity.id, name: identity.name });
+      initGroupDoc(group.doc, meta, { id: identity.id, name: identity.name });
       await group.close();
       await addGroupRef(ref);
       await refresh();
       setMode('list');
       onOpenGroup(ref);
     } catch {
-      setError("Couldn't create the group. Check device storage and try again.");
+      setError("Couldn't create it. Check device storage and try again.");
       setMode('list');
     }
   };
@@ -99,91 +104,143 @@ export function GroupListScreen({
   };
 
   if (mode === 'create') {
-    return <CreateGroupForm onSubmit={createGroup} onCancel={() => setMode('list')} />;
+    return <CreateForm onSubmit={createGroup} onCancel={() => setMode('list')} />;
   }
   if (mode === 'join') {
     return <JoinGroupForm onSubmit={joinGroup} onCancel={() => setMode('list')} />;
   }
 
+  const friends = (rows ?? []).filter((r) => r.kind === 'friend');
+  const groups = (rows ?? []).filter((r) => r.kind !== 'friend');
+
+  const renderRow = (item: GroupRow) => (
+    <Pressable
+      key={item.ref.id}
+      style={({ pressed }) => [styles.card, pressed && { opacity: 0.7 }]}
+      onPress={() => !item.broken && onOpenGroup(item.ref)}
+    >
+      <Text style={styles.listItemTitle}>
+        {item.kind === 'friend' ? '👤 ' : '👥 '}
+        {item.name}
+      </Text>
+      {item.broken && <Text style={styles.mutedText}>Local data unreadable</Text>}
+    </Pressable>
+  );
+
   return (
     <View style={[styles.container, { flex: 1 }]}>
-      <Text style={styles.title}>Your groups</Text>
+      <Text style={styles.title}>Splts</Text>
       <Text style={styles.subtitle}>Hi {identity.name} 👋</Text>
       {error && <Banner text={error} />}
-      <FlatList
-        data={rows ?? []}
-        keyExtractor={(row) => row.ref.id}
-        contentContainerStyle={{ gap: 8, paddingVertical: 8 }}
-        ListEmptyComponent={
-          rows === null ? null : (
-            <View style={[styles.card, { alignItems: 'center', paddingVertical: 28 }]}>
-              <Text style={styles.listItemTitle}>No groups yet</Text>
-              <Text style={[styles.mutedText, { textAlign: 'center' }]}>
-                Create a group for your trip or household, or join one with an
-                invite code a friend shared.
-              </Text>
-            </View>
-          )
-        }
-        renderItem={({ item }) => (
-          <Pressable
-            style={({ pressed }) => [styles.card, pressed && { opacity: 0.7 }]}
-            onPress={() => !item.broken && onOpenGroup(item.ref)}
-          >
-            <Text style={styles.listItemTitle}>{item.name}</Text>
-            <Text style={styles.mutedText}>
-              {item.broken ? 'Local data unreadable' : relayHost(item.ref.relayUrl)}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 8, paddingVertical: 8 }}>
+        {rows !== null && rows.length === 0 && (
+          <View style={[styles.card, { alignItems: 'center', paddingVertical: 28 }]}>
+            <Text style={styles.listItemTitle}>Nothing here yet</Text>
+            <Text style={[styles.mutedText, { textAlign: 'center' }]}>
+              Start a 1-on-1 ledger with a friend, create a group for a trip or
+              household, or join with an invite code.
             </Text>
-          </Pressable>
+          </View>
         )}
-      />
-      <PrimaryButton label="Create group" onPress={() => setMode('create')} />
+        {friends.length > 0 && <Text style={styles.sectionTitle}>Friends</Text>}
+        {friends.map(renderRow)}
+        {groups.length > 0 && <Text style={styles.sectionTitle}>Groups</Text>}
+        {groups.map(renderRow)}
+      </ScrollView>
+      <PrimaryButton label="New friend or group" onPress={() => setMode('create')} />
       <GhostButton label="Join with invite code" onPress={() => setMode('join')} />
     </View>
   );
 }
 
-function relayHost(url: string): string {
-  return url.replace(/^wss?:\/\//, '').replace(/\/.*$/, '');
-}
-
-function CreateGroupForm({
+function CreateForm({
   onSubmit,
   onCancel,
 }: {
-  onSubmit: (name: string, relayUrl: string) => void;
+  onSubmit: (meta: GroupMeta, relayUrl: string) => void;
   onCancel: () => void;
 }) {
+  const [kind, setKind] = useState<'friend' | 'group'>('friend');
   const [name, setName] = useState('');
+  const [currency, setCurrency] = useState('USD');
+  const [customCurrency, setCustomCurrency] = useState('');
   const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY_URL);
   const [advanced, setAdvanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  const chosenCurrency = (customCurrency.trim() || currency).toUpperCase();
+  const valid = name.trim().length > 0 && /^[A-Z]{3}$/.test(chosenCurrency) && relayUrl.trim().length > 0;
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>New group</Text>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <Text style={styles.title}>New</Text>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {(
+          [
+            ['friend', '👤 Friend (1-on-1)'],
+            ['group', '👥 Group'],
+          ] as const
+        ).map(([k, label]) => (
+          <Pressable
+            key={k}
+            onPress={() => setKind(k)}
+            style={[
+              styles.buttonSecondary,
+              { flex: 1 },
+              kind === k && { backgroundColor: colors.primary },
+            ]}
+          >
+            <Text style={[styles.buttonSecondaryText, kind === k && { color: '#fff' }]}>{label}</Text>
+          </Pressable>
+        ))}
+      </View>
       <Field
-        placeholder="Group name (e.g. Goa trip)"
+        placeholder={kind === 'friend' ? "Friend's name (e.g. Rahul)" : 'Group name (e.g. Goa trip)'}
         value={name}
         onChangeText={setName}
         autoFocus
       />
+      <Text style={styles.mutedText}>Currency</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {CURRENCIES.map((c) => (
+          <Pressable
+            key={c}
+            onPress={() => {
+              setCurrency(c);
+              setCustomCurrency('');
+            }}
+            style={[
+              styles.buttonSecondary,
+              { paddingHorizontal: 12, paddingVertical: 8 },
+              chosenCurrency === c && { backgroundColor: colors.primary },
+            ]}
+          >
+            <Text style={[styles.buttonSecondaryText, chosenCurrency === c && { color: '#fff' }]}>
+              {c}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <Field
+        placeholder="Other (3-letter code, e.g. CHF)"
+        value={customCurrency}
+        onChangeText={setCustomCurrency}
+        autoCapitalize="characters"
+        maxLength={3}
+      />
       <View style={styles.row}>
         <Text style={styles.mutedText}>Advanced: choose sync server</Text>
-        <Switch
-          value={advanced}
-          onValueChange={setAdvanced}
-          trackColor={{ true: colors.primary }}
-        />
+        <Switch value={advanced} onValueChange={setAdvanced} trackColor={{ true: colors.primary }} />
       </View>
       {advanced && (
         <>
           <Text style={styles.mutedText}>
-            The relay is the “dumb pipe” your group syncs through. Anyone in
-            the group can host one — it never sees your balances.
+            The relay is the “dumb pipe” you sync through — it works anywhere
+            with internet. The default is a free public relay; self-host
+            packages/relay for full privacy.
           </Text>
           <Field
-            placeholder="ws://your-relay:4444"
+            placeholder="wss://your-relay.example.com"
             value={relayUrl}
             onChangeText={setRelayUrl}
             autoCapitalize="none"
@@ -192,15 +249,15 @@ function CreateGroupForm({
         </>
       )}
       <PrimaryButton
-        label={submitting ? 'Creating…' : 'Create'}
-        disabled={!name.trim() || !relayUrl.trim() || submitting}
+        label={submitting ? 'Creating…' : kind === 'friend' ? 'Start ledger' : 'Create group'}
+        disabled={!valid || submitting}
         onPress={() => {
           setSubmitting(true);
-          onSubmit(name.trim(), relayUrl.trim());
+          onSubmit({ name: name.trim(), currency: chosenCurrency, kind }, relayUrl.trim());
         }}
       />
       <GhostButton label="Cancel" onPress={onCancel} />
-    </View>
+    </ScrollView>
   );
 }
 
@@ -217,13 +274,13 @@ function JoinGroupForm({
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Join group</Text>
+      <Text style={styles.title}>Join</Text>
       <Text style={styles.mutedText}>
         Paste the invite code someone shared with you.
       </Text>
       {error && <Banner text={error} />}
       <Field
-        placeholder="a1b2c3…@ws://relay:4444"
+        placeholder="a1b2c3…@wss://relay"
         value={code}
         onChangeText={setCode}
         autoCapitalize="none"

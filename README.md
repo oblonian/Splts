@@ -69,6 +69,23 @@ snapshot directory; without it the relay is purely in-memory and peers re-seed
 it on reconnect). Because the relay is interchangeable, a group can migrate
 relays at any time — the devices hold the data.
 
+## Syncing over the internet
+
+The app defaults to the free public Yjs relay (`wss://demos.yjs.dev/ws`), so
+friends and groups sync over the internet with zero setup — group ids are
+unguessable 128-bit room names. For full privacy, self-host `packages/relay`
+on any server and set its URL under *Advanced* when creating a group.
+
+## iOS
+
+Apple doesn't allow direct sideloading. Options, in increasing effort:
+
+1. **Expo Go** (free, instant): `cd apps/mobile && npx expo start`, scan the QR.
+2. **Unsigned IPA** (`splts-unsigned.ipa` on the release page): install with
+   [AltStore](https://altstore.io) or Sideloadly using a free Apple ID
+   (re-sign every 7 days on a free account).
+3. **TestFlight / App Store**: requires a $99/yr Apple Developer account.
+
 ## Honest limitations (v0)
 
 - **No end-to-end encryption yet.** The relay stores CRDT bytes it could

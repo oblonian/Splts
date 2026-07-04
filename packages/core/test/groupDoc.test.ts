@@ -21,7 +21,7 @@ describe('group doc', () => {
   it('initializes meta and creator', () => {
     const doc = new Y.Doc();
     initGroupDoc(doc, { name: 'Trip', currency: 'EUR' }, { id: 'alice', name: 'Alice' });
-    expect(readMeta(doc)).toEqual({ name: 'Trip', currency: 'EUR' });
+    expect(readMeta(doc)).toEqual({ name: 'Trip', currency: 'EUR', kind: 'group' });
     expect(readMembers(doc)).toEqual([{ id: 'alice', name: 'Alice' }]);
   });
 

@@ -1,4 +1,4 @@
-name: Android APK
+name: Build apps
 
 on:
   workflow_dispatch:
@@ -11,6 +11,60 @@ permissions:
   contents: write
 
 jobs:
+  ios:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate native iOS project
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform ios --no-install
+        env:
+          CI: 1
+
+      - name: Install CocoaPods
+        working-directory: apps/mobile/ios
+        run: pod install
+
+      - name: Build unsigned archive
+        working-directory: apps/mobile/ios
+        run: |
+          xcodebuild -workspace Splts.xcworkspace -scheme Splts \
+            -configuration Release -sdk iphoneos \
+            -archivePath build/Splts.xcarchive archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -r apps/mobile/ios/build/Splts.xcarchive/Products/Applications/*.app Payload/
+          zip -qry splts-unsigned.ipa Payload
+          ls -la splts-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: splts-unsigned-ipa
+          path: splts-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish IPA to the "latest" pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          prerelease: true
+          files: splts-unsigned.ipa
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -101,8 +155,9 @@ jobs:
           body: |
             Automated build from ${{ github.sha }}.
 
-            - **splts-arm64.apk** — smaller; works on virtually every phone from ~2016 onwards. Try this first.
-            - **splts.apk** — universal (all CPU types), larger.
+            - **splts-arm64.apk** — Android; smaller, works on virtually every phone from ~2016 onwards. Try this first.
+            - **splts.apk** — Android universal (all CPU types), larger.
+            - **splts-unsigned.ipa** — iOS, unsigned. Apple doesn't allow direct sideloading: install it with [AltStore](https://altstore.io) or Sideloadly using your (free) Apple ID.
 
             Sideload on Android: download an APK, open it, and allow
             installs from your browser when prompted.

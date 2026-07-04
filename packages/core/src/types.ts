@@ -17,6 +17,8 @@ export interface GroupMeta {
   name: string;
   /** ISO 4217 code, e.g. "USD", "INR". One currency per group in v0. */
   currency: string;
+  /** 'friend' = a 1-on-1 ledger with one other person; default 'group'. */
+  kind?: 'group' | 'friend';
 }
 
 /**

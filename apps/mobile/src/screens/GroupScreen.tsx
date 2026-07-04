@@ -177,10 +177,18 @@ export function GroupScreen({
         </Text>
       </View>
 
-      <Text style={styles.title}>{meta.name}</Text>
+      <Text style={styles.title}>{meta.kind === 'friend' ? `👤 ${meta.name}` : meta.name}</Text>
       <Text style={styles.subtitle}>
-        {members.length} member{members.length === 1 ? '' : 's'} · {meta.currency}
+        {meta.kind === 'friend'
+          ? `1-on-1 ledger · ${meta.currency}`
+          : `${members.length} member${members.length === 1 ? '' : 's'} · ${meta.currency}`}
       </Text>
+      {meta.kind === 'friend' && members.length === 1 && (
+        <Banner
+          kind="info"
+          text={`Waiting for ${meta.name} to join — send them the invite below.`}
+        />
+      )}
 
       {saveError && (
         <Banner text="Couldn't save changes to this device — free up storage. Synced copies are unaffected." />
@@ -205,7 +213,10 @@ export function GroupScreen({
       </View>
 
       <PrimaryButton label="Add expense" onPress={() => setAdding(true)} />
-      <GhostButton label="Invite someone" onPress={shareInvite} />
+      <GhostButton
+        label={meta.kind === 'friend' ? `Invite ${meta.name}` : 'Invite someone'}
+        onPress={shareInvite}
+      />
 
       {members.length > 1 && (
         <View style={styles.card}>

@@ -34,6 +34,7 @@ export function initGroupDoc(doc: Y.Doc, meta: GroupMeta, creator: Member): void
     const m = getMeta(doc);
     m.set('name', meta.name);
     m.set('currency', meta.currency);
+    m.set('kind', meta.kind ?? 'group');
     getMembersMap(doc).set(creator.id, creator);
   });
 }
@@ -43,6 +44,7 @@ export function readMeta(doc: Y.Doc): GroupMeta {
   return {
     name: m.get('name') ?? 'Unnamed group',
     currency: m.get('currency') ?? 'USD',
+    kind: m.get('kind') === 'friend' ? 'friend' : 'group',
   };
 }
 

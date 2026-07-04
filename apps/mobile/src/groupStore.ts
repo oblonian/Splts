@@ -4,7 +4,13 @@ import { WebsocketProvider } from 'y-websocket';
 import { newId } from '@splts/core';
 import { fromBase64, toBase64 } from './base64';
 
-export const DEFAULT_RELAY_URL = 'ws://localhost:4444';
+/**
+ * Default: the public Yjs community relay, so groups sync over the internet
+ * with zero setup. Room names are unguessable 128-bit ids, but the relay can
+ * read CRDT bytes it forwards (E2EE is on the roadmap) — self-host
+ * packages/relay and set your own URL under Advanced for private infra.
+ */
+export const DEFAULT_RELAY_URL = 'wss://demos.yjs.dev/ws';
 
 const INDEX_KEY = 'splts:groups';
 const docKey = (groupId: string) => `splts:doc:${groupId}`;
