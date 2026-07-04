@@ -71,10 +71,22 @@ relays at any time — the devices hold the data.
 
 ## Syncing over the internet
 
-The app defaults to the free public Yjs relay (`wss://demos.yjs.dev/ws`), so
-friends and groups sync over the internet with zero setup — group ids are
-unguessable 128-bit room names. For full privacy, self-host `packages/relay`
-on any server and set its URL under *Advanced* when creating a group.
+Splts syncs through a relay — a tiny "dumb pipe" server that never sees your
+balances. There is no public relay you can trust with your data (the Yjs
+community demo relay has been retired), so run your own — it's free:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/oblonian/Splts)
+
+1. Click the button, sign in with GitHub, deploy (free plan is fine).
+2. Copy the service URL Render gives you and change `https://` to `wss://`
+   (e.g. `wss://splts-relay-xxxx.onrender.com`).
+3. Paste it as the sync server when creating a friend/group. The app
+   remembers it for next time, and invites carry it automatically.
+
+Note: Render's free plan sleeps after ~15 idle minutes; the first sync after
+a quiet period takes ~30–60 s to wake it. Any other host works too —
+`packages/relay` runs anywhere Node or Docker runs. An existing ledger's
+server can be changed from its screen ("Not syncing?").
 
 ## iOS
 

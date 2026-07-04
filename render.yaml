@@ -1,0 +1,10 @@
+# One-click deploy of the Splts relay on Render's free tier.
+# https://render.com/deploy?repo=<this repo URL>
+services:
+  - type: web
+    name: splts-relay
+    runtime: docker
+    dockerfilePath: ./packages/relay/Dockerfile
+    dockerContext: ./packages/relay
+    plan: free
+    healthCheckPath: /

@@ -1,15 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { getMeta, initGroupDoc, upsertMember, type GroupMeta } from '@splts/core';
 import type { Identity } from '../identity';
 import {
   addGroupRef,
   decodeInvite,
-  DEFAULT_RELAY_URL,
+  getLastRelay,
   listGroups,
   loadGroupSnapshot,
   newGroupRef,
   openGroup,
+  probeRelay,
+  RELAY_PLACEHOLDER,
+  setLastRelay,
   type GroupRef,
 } from '../groupStore';
 import { colors, styles } from '../theme';
@@ -35,6 +38,11 @@ export function GroupListScreen({
   const [rows, setRows] = useState<GroupRow[] | null>(null);
   const [mode, setMode] = useState<'list' | 'create' | 'join'>('list');
   const [error, setError] = useState<string | null>(null);
+  const [lastRelay, setLastRelayState] = useState<string | null>(null);
+
+  useEffect(() => {
+    getLastRelay().then(setLastRelayState);
+  }, [mode]);
 
   useBackHandler(mode !== 'list', () => setMode('list'));
 
@@ -76,6 +84,7 @@ export function GroupListScreen({
       initGroupDoc(group.doc, meta, { id: identity.id, name: identity.name });
       await group.close();
       await addGroupRef(ref);
+      await setLastRelay(relayUrl);
       await refresh();
       setMode('list');
       onOpenGroup(ref);
@@ -94,6 +103,7 @@ export function GroupListScreen({
       upsertMember(group.doc, { id: identity.id, name: identity.name });
       await group.close();
       await addGroupRef(ref);
+      await setLastRelay(ref.relayUrl);
       await refresh();
       setMode('list');
       onOpenGroup(ref);
@@ -104,7 +114,13 @@ export function GroupListScreen({
   };
 
   if (mode === 'create') {
-    return <CreateForm onSubmit={createGroup} onCancel={() => setMode('list')} />;
+    return (
+      <CreateForm
+        initialRelay={lastRelay ?? ''}
+        onSubmit={createGroup}
+        onCancel={() => setMode('list')}
+      />
+    );
   }
   if (mode === 'join') {
     return <JoinGroupForm onSubmit={joinGroup} onCancel={() => setMode('list')} />;
@@ -154,9 +170,11 @@ export function GroupListScreen({
 }
 
 function CreateForm({
+  initialRelay,
   onSubmit,
   onCancel,
 }: {
+  initialRelay: string;
   onSubmit: (meta: GroupMeta, relayUrl: string) => void;
   onCancel: () => void;
 }) {
@@ -164,8 +182,9 @@ function CreateForm({
   const [name, setName] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [customCurrency, setCustomCurrency] = useState('');
-  const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY_URL);
-  const [advanced, setAdvanced] = useState(false);
+  const [relayUrl, setRelayUrl] = useState(initialRelay);
+  // No relay remembered yet: show the sync-server section so the user sets one.
+  const [advanced, setAdvanced] = useState(initialRelay.length === 0);
   const [submitting, setSubmitting] = useState(false);
 
   const chosenCurrency = (customCurrency.trim() || currency).toUpperCase();
@@ -240,7 +259,7 @@ function CreateForm({
             packages/relay for full privacy.
           </Text>
           <Field
-            placeholder="wss://your-relay.example.com"
+            placeholder={RELAY_PLACEHOLDER}
             value={relayUrl}
             onChangeText={setRelayUrl}
             autoCapitalize="none"
@@ -251,9 +270,29 @@ function CreateForm({
       <PrimaryButton
         label={submitting ? 'Creating…' : kind === 'friend' ? 'Start ledger' : 'Create group'}
         disabled={!valid || submitting}
-        onPress={() => {
+        onPress={async () => {
           setSubmitting(true);
-          onSubmit({ name: name.trim(), currency: chosenCurrency, kind }, relayUrl.trim());
+          const url = relayUrl.trim();
+          const reachable = await probeRelay(url);
+          if (!reachable) {
+            setSubmitting(false);
+            Alert.alert(
+              "Can't reach that sync server",
+              'You can still create the ledger — it will sync once the server is reachable. See the README for a one-click free relay.',
+              [
+                { text: 'Fix the URL', style: 'cancel' },
+                {
+                  text: 'Create anyway',
+                  onPress: () => {
+                    setSubmitting(true);
+                    onSubmit({ name: name.trim(), currency: chosenCurrency, kind }, url);
+                  },
+                },
+              ],
+            );
+            return;
+          }
+          onSubmit({ name: name.trim(), currency: chosenCurrency, kind }, url);
         }}
       />
       <GhostButton label="Cancel" onPress={onCancel} />

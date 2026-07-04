@@ -15,7 +15,15 @@ import {
   type Member,
 } from '@splts/core';
 import type { Identity } from '../identity';
-import { encodeInvite, openGroup, type GroupRef, type OpenGroup } from '../groupStore';
+import {
+  encodeInvite,
+  openGroup,
+  RELAY_PLACEHOLDER,
+  setLastRelay,
+  updateGroupRelay,
+  type GroupRef,
+  type OpenGroup,
+} from '../groupStore';
 import { colors, styles } from '../theme';
 import { Banner, Field, GhostButton, PrimaryButton } from '../ui';
 import { useBackHandler } from '../useBackHandler';
@@ -36,8 +44,13 @@ export function GroupScreen({
   // Bumped on every doc change to re-render from the latest CRDT state.
   const [version, setVersion] = useState(0);
   const [adding, setAdding] = useState(false);
+  const [editingRelay, setEditingRelay] = useState(false);
+  const [relayDraft, setRelayDraft] = useState(groupRef.relayUrl);
 
-  useBackHandler(adding, () => setAdding(false));
+  useBackHandler(adding || editingRelay, () => {
+    setAdding(false);
+    setEditingRelay(false);
+  });
 
   useEffect(() => {
     let active = true;
@@ -192,6 +205,44 @@ export function GroupScreen({
 
       {saveError && (
         <Banner text="Couldn't save changes to this device — free up storage. Synced copies are unaffected." />
+      )}
+
+      {!connected && !editingRelay && (
+        <Pressable onPress={() => setEditingRelay(true)} hitSlop={8}>
+          <Text style={[styles.mutedText, { textDecorationLine: 'underline' }]}>
+            Not syncing? Change the sync server
+          </Text>
+        </Pressable>
+      )}
+      {editingRelay && (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Sync server for this ledger</Text>
+          <Text style={styles.mutedText}>
+            Everyone in this ledger must use the same server — re-share the
+            invite after changing it. Deploy a free one via the README.
+          </Text>
+          <Field
+            placeholder={RELAY_PLACEHOLDER}
+            value={relayDraft}
+            onChangeText={setRelayDraft}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <PrimaryButton
+            label="Save & reconnect"
+            disabled={!/^wss?:\/\/.+/.test(relayDraft.trim())}
+            onPress={async () => {
+              const url = relayDraft.trim();
+              await updateGroupRelay(groupRef.id, url);
+              await setLastRelay(url);
+              setEditingRelay(false);
+              Alert.alert('Saved', 'Reopen this ledger to connect to the new server.', [
+                { text: 'OK', onPress: onBack },
+              ]);
+            }}
+          />
+          <GhostButton label="Cancel" onPress={() => setEditingRelay(false)} />
+        </View>
       )}
 
       <View style={[styles.card, { alignItems: 'center', paddingVertical: 18 }]}>

@@ -5,12 +5,52 @@ import { newId } from '@splts/core';
 import { fromBase64, toBase64 } from './base64';
 
 /**
- * Default: the public Yjs community relay, so groups sync over the internet
- * with zero setup. Room names are unguessable 128-bit ids, but the relay can
- * read CRDT bytes it forwards (E2EE is on the roadmap) — self-host
- * packages/relay and set your own URL under Advanced for private infra.
+ * There is no trustworthy public relay to default to (the Yjs community
+ * relay was retired), so the app remembers the last relay you used and the
+ * README has a one-click "Deploy to Render" button for your own free relay.
  */
-export const DEFAULT_RELAY_URL = 'wss://demos.yjs.dev/ws';
+export const RELAY_PLACEHOLDER = 'wss://your-relay.onrender.com';
+
+const LAST_RELAY_KEY = 'splts:lastRelay';
+
+export async function getLastRelay(): Promise<string | null> {
+  return AsyncStorage.getItem(LAST_RELAY_KEY).catch(() => null);
+}
+
+export async function setLastRelay(url: string): Promise<void> {
+  await AsyncStorage.setItem(LAST_RELAY_KEY, url).catch(() => {});
+}
+
+/** Point an existing ledger at a different relay (e.g. after the old one died). */
+export async function updateGroupRelay(groupId: string, relayUrl: string): Promise<void> {
+  const groups = await listGroups();
+  const next = groups.map((g) => (g.id === groupId ? { ...g, relayUrl } : g));
+  await saveGroups(next);
+}
+
+/** Resolves true if a websocket to `url` opens within `timeoutMs`. */
+export function probeRelay(url: string, timeoutMs = 5000): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (!settled) {
+        settled = true;
+        try { ws.close(); } catch {}
+        resolve(ok);
+      }
+    };
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(`${url.replace(/\/$/, '')}/splts-probe`);
+    } catch {
+      resolve(false);
+      return;
+    }
+    const timer = setTimeout(() => done(false), timeoutMs);
+    ws.onopen = () => { clearTimeout(timer); done(true); };
+    ws.onerror = () => { clearTimeout(timer); done(false); };
+  });
+}
 
 const INDEX_KEY = 'splts:groups';
 const docKey = (groupId: string) => `splts:doc:${groupId}`;
