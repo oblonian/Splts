@@ -21,5 +21,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Probe relay host over HTTPS
+        run: |
+          host=$(echo "${{ github.event.inputs.relay }}" | sed -E 's#^wss?://##; s#/.*$##')
+          echo "probing https://$host"
+          curl -sS -o /dev/null -w "%{http_code}\n" --max-time 10 "https://$host" || true
       - name: Connect and report (read-only, counts only)
         run: node .github/scripts/verify-room.mjs "${{ github.event.inputs.relay }}" "${{ github.event.inputs.room }}"
