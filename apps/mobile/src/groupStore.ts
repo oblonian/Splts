@@ -41,7 +41,7 @@ export function probeRelay(url: string, timeoutMs = 5000): Promise<boolean> {
     };
     let ws: WebSocket;
     try {
-      ws = new WebSocket(`${url.replace(/\/$/, '')}/splts-probe`);
+      ws = new WebSocket(`${normalizeRelayUrl(url)}/splts-probe`);
     } catch {
       resolve(false);
       return;
@@ -96,6 +96,22 @@ export function newGroupRef(relayUrl: string): GroupRef {
   return { id: newId(), relayUrl };
 }
 
+/**
+ * People paste relay addresses as they see them in a browser (https://…);
+ * websockets want wss://. Accept either and normalize, so a copy-pasted
+ * Render URL just works.
+ */
+export function normalizeRelayUrl(input: string): string {
+  const url = input.trim().replace(/\/+$/, '');
+  if (/^https:\/\//i.test(url)) return url.replace(/^https:\/\//i, 'wss://');
+  if (/^http:\/\//i.test(url)) return url.replace(/^http:\/\//i, 'ws://');
+  return url;
+}
+
+export function isValidRelayUrl(input: string): boolean {
+  return /^(wss?|https?):\/\/.+/i.test(input.trim());
+}
+
 /** Invite code format: <groupId>@<relayUrl> */
 export function encodeInvite(ref: GroupRef): string {
   return `${ref.id}@${ref.relayUrl}`;
@@ -105,7 +121,7 @@ export function decodeInvite(code: string): GroupRef | null {
   const at = code.indexOf('@');
   if (at <= 0) return null;
   const id = code.slice(0, at).trim();
-  const relayUrl = code.slice(at + 1).trim();
+  const relayUrl = normalizeRelayUrl(code.slice(at + 1));
   if (!/^[0-9a-f]{32}$/.test(id) || !/^wss?:\/\/.+/.test(relayUrl)) return null;
   return { id, relayUrl };
 }
@@ -202,7 +218,8 @@ export async function openGroup(ref: GroupRef, options?: OpenGroupOptions): Prom
   };
   doc.on('update', persistSoon);
 
-  const provider = new WebsocketProvider(ref.relayUrl, `splts-${ref.id}`, doc, {
+  // Older builds could store https:// here; normalize so those ledgers heal.
+  const provider = new WebsocketProvider(normalizeRelayUrl(ref.relayUrl), `splts-${ref.id}`, doc, {
     disableBc: true,
   });
 

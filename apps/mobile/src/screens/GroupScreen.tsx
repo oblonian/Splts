@@ -17,6 +17,8 @@ import {
 import type { Identity } from '../identity';
 import {
   encodeInvite,
+  isValidRelayUrl,
+  normalizeRelayUrl,
   openGroup,
   RELAY_PLACEHOLDER,
   setLastRelay,
@@ -147,9 +149,13 @@ export function GroupScreen({
   };
 
   const shareInvite = () => {
-    Share.share({ message: `Join "${meta.name}" on Splts: ${encodeInvite(groupRef)}` }).catch(
-      () => {},
-    );
+    Share.share({
+      message:
+        `Join "${meta.name}" on Splts!\n\n` +
+        `1. Get the app: https://github.com/oblonian/Splts/releases/tag/latest\n` +
+        `2. Open it, tap "Join with invite code", and paste:\n\n` +
+        encodeInvite(groupRef),
+    }).catch(() => {});
   };
 
   if (adding) {
@@ -230,9 +236,9 @@ export function GroupScreen({
           />
           <PrimaryButton
             label="Save & reconnect"
-            disabled={!/^wss?:\/\/.+/.test(relayDraft.trim())}
+            disabled={!isValidRelayUrl(relayDraft)}
             onPress={async () => {
-              const url = relayDraft.trim();
+              const url = normalizeRelayUrl(relayDraft);
               await updateGroupRelay(groupRef.id, url);
               await setLastRelay(url);
               setEditingRelay(false);

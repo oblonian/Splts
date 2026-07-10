@@ -8,7 +8,9 @@ import {
   getLastRelay,
   listGroups,
   loadGroupSnapshot,
+  isValidRelayUrl,
   newGroupRef,
+  normalizeRelayUrl,
   openGroup,
   probeRelay,
   RELAY_PLACEHOLDER,
@@ -188,7 +190,7 @@ function CreateForm({
   const [submitting, setSubmitting] = useState(false);
 
   const chosenCurrency = (customCurrency.trim() || currency).toUpperCase();
-  const valid = name.trim().length > 0 && /^[A-Z]{3}$/.test(chosenCurrency) && relayUrl.trim().length > 0;
+  const valid = name.trim().length > 0 && /^[A-Z]{3}$/.test(chosenCurrency) && isValidRelayUrl(relayUrl);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
@@ -272,7 +274,7 @@ function CreateForm({
         disabled={!valid || submitting}
         onPress={async () => {
           setSubmitting(true);
-          const url = relayUrl.trim();
+          const url = normalizeRelayUrl(relayUrl);
           const reachable = await probeRelay(url);
           if (!reachable) {
             setSubmitting(false);
