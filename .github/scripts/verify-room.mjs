@@ -17,7 +17,8 @@ const provider = new WebsocketProvider(relay, `splts-${room}`, doc, {
 });
 provider.on('status', ({ status }) => console.log('connection:', status));
 
-const deadline = Date.now() + 25000;
+// Generous: free-tier relays cold-start in ~30-60s after idling.
+const deadline = Date.now() + 90000;
 const poll = setInterval(() => {
   const synced = provider.synced;
   const name = doc.getMap('meta').get('name');

@@ -24,7 +24,8 @@ jobs:
       - name: Probe relay host over HTTPS
         run: |
           host=$(echo "${{ github.event.inputs.relay }}" | sed -E 's#^wss?://##; s#/.*$##')
-          echo "probing https://$host"
-          curl -sS -o /dev/null -w "%{http_code}\n" --max-time 10 "https://$host" || true
+          echo "probing https://$host (long timeout to wake sleeping free-tier hosts)"
+          curl -sS --max-time 90 "https://$host" || true
+          echo
       - name: Connect and report (read-only, counts only)
         run: node .github/scripts/verify-room.mjs "${{ github.event.inputs.relay }}" "${{ github.event.inputs.room }}"
